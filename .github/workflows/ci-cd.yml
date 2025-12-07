@@ -66,13 +66,14 @@ jobs:
           echo "Found jar: $JAR_PATH"
           mv "$JAR_PATH" target/app.jar
 
-      # Декодируем base64 в МНОГОСТРОЧНУЮ env-переменную SSH_KEY
-      - name: Decode SSH key into env
+      - name: Decode SSH key (base64)
+        id: sshkey
         shell: bash
         run: |
-          echo "SSH_KEY<<EOF" >> $GITHUB_ENV
-          echo "${{ secrets.SSH_KEY_B64 }}" | base64 -d >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          KEY="$(echo "${{ secrets.SSH_KEY }}" | base64 -d)"
+          echo "key<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$KEY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Upload app.jar via SCP
         uses: appleboy/scp-action@v1
@@ -80,7 +81,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT }}
-          key: ${{ env.SSH_KEY }}
+          key: ${{ steps.sshkey.outputs.key }}
           source: "target/app.jar"
           target: "/opt/ci-cd-calculator/"
           overwrite: true
@@ -91,10 +92,6 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT }}
-          key: ${{ env.SSH_KEY }}
+          key: ${{ steps.sshkey.outputs.key }}
           script: |
-            ls -la /opt/ci-cd-calculator
             /opt/ci-cd-calculator/restart.sh
-            sleep 1
-            ps aux | grep app.jar || true
-            tail -n 30 /opt/ci-cd-calculator/app.log || true

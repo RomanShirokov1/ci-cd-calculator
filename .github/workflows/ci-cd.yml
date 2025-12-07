@@ -2,33 +2,33 @@ name: CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
   build-and-test:
     name: Build & test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os:
-          - ubuntu-latest      # Linux
-          - windows-latest     # Windows
-          - macos-15-intel     # macOS Intel
-          - macos-15           # macOS Apple Silicon (M1/M2)
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Cache Maven packages
+      - name: Cache Maven
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
@@ -36,47 +36,58 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
-      - name: Build and test
+      - name: Build & test
         run: mvn -B verify
 
   deploy:
-    name: Deploy to server over SSH
-    needs: build-and-test        # запускать только если все ОС прошли
+    name: Deploy to VPS
+    needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Build JAR
         run: mvn -B package
 
-      # Копируем JAR на сервер
-      - name: Upload JAR via SCP
-        uses: appleboy/scp-action@v1 :contentReference[oaicite:1]{index=1}
+      - name: Rename JAR to app.jar
+        shell: bash
+        run: |
+          ls -la target
+          # берём первый jar из target (обычно он один)
+          JAR_PATH="$(ls -1 target/*.jar | head -n 1)"
+          echo "Found jar: $JAR_PATH"
+          mv "$JAR_PATH" target/app.jar
+
+      - name: Upload app.jar via SCP
+        uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          source: "target/ci-java-calculator-1.0-SNAPSHOT.jar"
-          target: "/opt/ci-java-calculator/app.jar"
+          source: "target/app.jar"
+          target: "/opt/ci-cd-calculator/"
+          overwrite: true
 
-      # Выполняем удалённую команду (перезапуск приложения)
       - name: Restart app over SSH
-        uses: appleboy/ssh-action@v1 :contentReference[oaicite:2]{index=2}
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd /opt/ci-java-calculator
-            ./restart.sh
+            ls -la /opt/ci-cd-calculator
+            /opt/ci-cd-calculator/restart.sh
+            sleep 1
+            ps aux | grep app.jar || true
+            tail -n 30 /opt/ci-cd-calculator/app.log || true

@@ -67,13 +67,20 @@ jobs:
           echo "Found jar: $JAR_PATH"
           mv "$JAR_PATH" target/app.jar
 
+      - name: Write SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY_B64 }}" | base64 -d > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
       - name: Upload app.jar via SCP
         uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
+          key_path: ~/.ssh/id_ed25519
           source: "target/app.jar"
           target: "/opt/ci-cd-calculator/"
           overwrite: true
@@ -83,8 +90,8 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
+          key_path: ~/.ssh/id_ed25519
           script: |
             ls -la /opt/ci-cd-calculator
             /opt/ci-cd-calculator/restart.sh
